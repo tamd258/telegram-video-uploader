@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# Session files
+*.session
+*.session-journal
+
+# Config with secrets
+config/config.yaml
+config/alist_config.json
+config/rclone.conf
+
+# Downloaded files
+downloads/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
