@@ -1,0 +1,41 @@
+{
+  "_comment": "alist config 仅用于本地运行。GitHub Actions 中通过 MCLOUD_AUTHORIZATION Secret 动态生成",
+  "force": false,
+  "site_url": "",
+  "cdn": "",
+  "jwt_secret": "random_generated_secret",
+  "token_expires_in": 48,
+  "scheme": {
+    "address": "0.0.0.0",
+    "http_port": 5244,
+    "https_port": -1,
+    "force_https": false,
+    "cert_file": "",
+    "key_file": ""
+  },
+  "temp_dir": "data/temp",
+  "log": {
+    "enable": true,
+    "name": "data/log/log.log",
+    "max_size": 50,
+    "max_backups": 30,
+    "max_age": 28,
+    "compress": false
+  },
+  "max_connections": 0,
+  "tls_insecure_skip_verify": false,
+  "storages": [
+    {
+      "driver": "139",
+      "mount_path": "/mcloud",
+      "type": "new_cloud",
+      "authorization": "YOUR_AUTHORIZATION_HERE",
+      "root_folder_id": "",
+      "cloud_id": "",
+      "upload_part_size": 20971520,
+      "remove_way": "trash",
+      "webdav_policy": "native_proxy",
+      "webdav_proxy": true
+    }
+  ]
+}
