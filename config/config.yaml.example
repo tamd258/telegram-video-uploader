@@ -1,0 +1,27 @@
+# config.yaml 仅用于本地运行
+# GitHub Actions 中通过 Secrets (TG_API_ID / TG_API_HASH / TG_CHAT_IDS) 注入
+#
+# 本地使用步骤:
+#   1. 复制此文件为 config/config.yaml
+#   2. 填入真实值
+#   3. 运行 bash scripts/run.sh
+
+telegram:
+  api_id: 12345678                       # ← 替换
+  api_hash: "your_api_hash_here"         # ← 替换
+  session_name: "downloader"
+
+chats:
+  - chat_id: "@channel_name"             # ← 替换为你的频道
+    last_message_id: 0
+
+download_dir: "./downloads"
+max_total_size_gb: 12.0
+skip_larger_than_gb: 2.0
+
+cloud:
+  rclone_remote: "mcloud"
+  remote_dir: "/aaa"
+  delete_after_upload: true
+
+log_level: "INFO"
