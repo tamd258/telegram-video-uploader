@@ -34,7 +34,7 @@ Telegram API (Pyrogram)
 | `TG_API_ID` | Telegram API ID（纯数字） | [my.telegram.org/apps](https://my.telegram.org/apps) → API development tools |
 | `TG_API_HASH` | Telegram API Hash | 同上 |
 | `TG_CHAT_IDS` | 频道/群组/收藏 ID，多个用英文逗号分隔 | 收藏填 `me`；公开频道写 `@频道名`；私有频道转发消息给 `@username_to_id_bot` 获取数字 ID |
-| `TG_SESSION_B64` | Telegram session 文件 (base64 编码) | 本地跑一次 `scripts/login.py` 生成, 见下方步骤 |
+| `TG_SESSION_STRING` | Telegram 字符串会话 (纯文本, 不用 base64) | 本地跑一次 `scripts/login.py` 登录, 把打印的字符串填进来, 见下方步骤 |
 | `GDRIVE_SA_B64` | Google Drive Service Account JSON (base64 编码) | 见下方详细步骤 |
 
 ### `TG_CHAT_IDS` 格式示例
@@ -46,12 +46,12 @@ me                              # 只拷贝收藏 (Saved Messages)
 @channel1,-1001234567890,me     # 频道 + 私有频道 + 收藏, 逗号分隔
 ```
 
-### 生成 `TG_SESSION_B64` 详细步骤
+### 生成 `TG_SESSION_STRING` 详细步骤
 
 GitHub Actions 无法交互输入手机验证码, 所以首次必须**本地登录一次**:
 
 1. 本地安装依赖: `pip install -r requirements.txt`
-2. 设置环境变量并登录 (在项目根目录执行):
+2. 在**一台能正常连接 Telegram 的机器**上 (需要代理/梯子), 设置环境变量并登录 (在项目根目录执行):
 
 ```powershell
 # Windows PowerShell
@@ -66,18 +66,11 @@ export TG_API_HASH=你的API_HASH
 python scripts/login.py
 ```
 
-3. 按提示输入手机号 (带国家码) 和 Telegram 验证码, 成功后生成 `downloader.session` 文件
-4. base64 编码并添加为 Secret `TG_SESSION_B64`:
+3. 按提示输入手机号 (带国家码, 如 +8613800138000) 和 Telegram 验证码
+4. 登录成功后, 终端会打印一段**纯文本字符串** (通常以 `1B` 或 `BQ` 开头, 几百字符长)
+5. 把这段字符串**原样复制**, 作为 GitHub Secret `TG_SESSION_STRING` 的值 (不需要 base64, 不要加引号)
 
-**Windows PowerShell:**
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("downloader.session"))
-```
-
-**Linux / macOS / Git Bash:**
-```bash
-base64 -w 0 downloader.session
-```
+> ⚠️ 复制时要从开头到结尾**完整**复制, 漏一个字符都会导致登录失败。
 
 ### 获取 `GDRIVE_SA_B64` 详细步骤
 
@@ -151,8 +144,8 @@ bash scripts/run.sh
 
 ## 首次运行注意事项
 
-- ⚠️ **GitHub Actions 无法交互输入验证码**，首次运行前必须先本地跑 `scripts/login.py` 生成 session 并配置 `TG_SESSION_B64` Secret（见上文步骤）
-- 之后每次运行会自动保存最新 session 到 artifact (保留 7 天)；artifact 过期后会自动回退用 `TG_SESSION_B64` 恢复，永不掉线
+- ⚠️ **GitHub Actions 无法交互输入验证码**，首次运行前必须先本地跑 `scripts/login.py` 登录，把打印的字符串配置为 `TG_SESSION_STRING` Secret（见上文步骤）。字符串会话一次生成永久有效，无需每次更新。
+- 上传到 Google Drive 用的是 Service Account，文件会进你**共享给 SA 的** `TelegramVideos` 文件夹（网页立即可见）。
 - Telegram 登录后频繁在不同 IP 登录可能触发风控，session 复用可避免此问题
 
 ## 分目录规则

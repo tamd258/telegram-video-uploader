@@ -1,8 +1,9 @@
 """
-本地登录 Telegram 生成 session 文件 (供 GitHub Actions 使用)
+本地登录 Telegram 生成「字符串会话」(StringSession), 供 GitHub Actions 使用
 
-GitHub Actions 无法交互输入验证码, 所以首次必须本地登录一次,
-把生成的 downloader.session 文件 base64 后存为 GitHub Secret: TG_SESSION_B64
+GitHub Actions 无法交互输入验证码, 所以必须本地登录一次。
+登录成功后会打印一段纯文本字符串 (通常以 1B / BQ 开头),
+把它作为 GitHub Secret: TG_SESSION_STRING 的值即可 (不需要 base64)。
 
 用法 (Windows PowerShell):
     $env:TG_API_ID = "12345678"
@@ -14,8 +15,7 @@ GitHub Actions 无法交互输入验证码, 所以首次必须本地登录一次
     export TG_API_HASH=你的api_hash
     python scripts/login.py
 
-登录成功后当前目录会生成 downloader.session 文件,
-base64 编码后添加为 GitHub Secret: TG_SESSION_B64
+⚠️ 必须在一台能正常连接 Telegram 的机器上运行 (需要代理/梯子)。
 """
 import asyncio
 import os
@@ -33,12 +33,17 @@ async def main():
         name = me.first_name or me.username or str(me.id)
         print(f"✅ 登录成功: {name}")
         print()
-        print("session 文件已生成: downloader.session")
-        print("下一步: base64 编码后添加为 GitHub Secret TG_SESSION_B64")
-        print("  Windows PowerShell:")
-        print('  [Convert]::ToBase64String([IO.File]::ReadAllBytes("downloader.session"))')
-        print("  Linux / macOS:")
-        print("  base64 -w 0 downloader.session")
+
+        # 导出字符串会话 (纯文本, 跨机器可用)
+        session_string = await client.export_session_string()
+
+        print("=" * 60)
+        print("复制下面这一整段字符串 (从 1B 或 BQ 开头到结尾, 不含引号):")
+        print("-" * 60)
+        print(session_string)
+        print("-" * 60)
+        print("把它作为 GitHub Secret: TG_SESSION_STRING 的值")
+        print("=" * 60)
 
 
 if __name__ == "__main__":

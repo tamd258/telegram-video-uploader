@@ -31,31 +31,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---- 恢复上次的 Telegram session (避免重复登录) ----
-      - name: Restore Telegram session
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: telegram-session
-
-      # ---- 从 Secret 恢复 session (首次运行 / artifact 过期时) ----
-      - name: Restore Telegram session from secret
-        env:
-          TG_SESSION_B64: ${{ secrets.TG_SESSION_B64 }}
-        run: |
-          if [ -f downloader.session ]; then
-            echo "✅ session restored from artifact"
-            exit 0
-          fi
-          if [ -z "$TG_SESSION_B64" ]; then
-            echo "⚠️ No session artifact and TG_SESSION_B64 secret not set"
-            echo "⚠️ 首次运行会因无法交互登录而失败!"
-            echo "⚠️ 请先本地运行 scripts/login.py 生成 session, base64 后添加 Secret TG_SESSION_B64"
-            exit 0
-          fi
-          echo "$TG_SESSION_B64" | base64 -d > downloader.session
-          echo "✅ session restored from TG_SESSION_B64 secret"
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -76,7 +51,6 @@ jobs:
           fi
           echo "$GDRIVE_SA_B64" | base64 -d > config/gdrive_service_account.json
           echo "✅ Google Drive Service Account JSON decoded"
-          # 提取 SA 邮箱用于日志确认
           python -c "import json; d=json.load(open('config/gdrive_service_account.json')); print(f'SA email: {d.get(\"client_email\", \"N/A\")}')"
 
       # ---- 下载 Telegram 视频 ----
@@ -85,8 +59,14 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_CHAT_IDS: ${{ secrets.TG_CHAT_IDS }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
           MAX_SIZE_GB: ${{ github.event.inputs.max_size_gb || '12' }}
         run: |
+          if [ -z "$TG_SESSION_STRING" ]; then
+            echo "❌ TG_SESSION_STRING secret is not set"
+            echo "   请本地运行 scripts/login.py 登录 Telegram, 把打印的字符串作为 Secret TG_SESSION_STRING 添加"
+            exit 1
+          fi
           python -c "
           import asyncio, os
           from pathlib import Path
@@ -122,7 +102,7 @@ jobs:
               print(f'📊 Total: {len(all_files)} files, {dl.tracker.downloaded_gb:.2f}GB')
 
               if all_files:
-                  Path('downloads/.filelist').write_text('\\n'.join(str(f) for f in all_files))
+                  Path('downloads/.filelist').write_text('\n'.join(str(f) for f in all_files))
 
           asyncio.run(main())
           "
@@ -184,14 +164,3 @@ jobs:
           if total_failed > 0:
               exit(1)
           "
-
-      # ---- 保存 session 供下次复用 ----
-      - name: Save Telegram session
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: telegram-session
-          path: |
-            downloader.session
-            downloader.session-journal
-          retention-days: 7

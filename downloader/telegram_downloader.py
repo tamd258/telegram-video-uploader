@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from pyrogram import Client
+from pyrogram import Client, StringSession
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +108,22 @@ class TelegramVideoDownloader:
         downloaded_files = []
         latest_msg_id = last_message_id
 
-        async with Client(
-            self.session_name,
-            api_id=self.api_id,
-            api_hash=self.api_hash,
-            workdir=str(self.download_dir.parent),
-        ) as client:
+        # 优先使用字符串会话 (GitHub Actions 场景, 从 Secret TG_SESSION_STRING 读取)
+        # 本地开发可保留文件会话 (downloader.session)
+        session_string = os.environ.get("TG_SESSION_STRING")
+        client_kwargs = {
+            "api_id": self.api_id,
+            "api_hash": self.api_hash,
+        }
+        if session_string:
+            client_kwargs["session"] = StringSession(session_string)
+            logger.info("使用 TG_SESSION_STRING 字符串会话登录")
+        else:
+            client_kwargs["session"] = self.session_name
+            client_kwargs["workdir"] = str(self.download_dir.parent)
+            logger.info("使用本地文件会话登录")
+
+        async with Client(**client_kwargs) as client:
             # 分目录: 每个 chat 的文件存到 downloads/<来源名>/ 子目录
             source_name = await self._resolve_source_name(client, chat_id)
             source_dir = self.download_dir / source_name
