@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from pyrogram import Client, StringSession
+from pyrogram import Client
 
 logger = logging.getLogger(__name__)
 
@@ -112,14 +112,14 @@ class TelegramVideoDownloader:
         # 本地开发可保留文件会话 (downloader.session)
         session_string = os.environ.get("TG_SESSION_STRING")
         client_kwargs = {
+            "name": self.session_name,
             "api_id": self.api_id,
             "api_hash": self.api_hash,
         }
         if session_string:
-            client_kwargs["session"] = StringSession(session_string)
+            client_kwargs["session_string"] = session_string
             logger.info("使用 TG_SESSION_STRING 字符串会话登录")
         else:
-            client_kwargs["session"] = self.session_name
             client_kwargs["workdir"] = str(self.download_dir.parent)
             logger.info("使用本地文件会话登录")
 
