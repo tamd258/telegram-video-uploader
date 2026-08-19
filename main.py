@@ -90,13 +90,9 @@ async def run_pipeline():
     logger.info("=== 开始上传到 Google Drive ===")
     cloud_cfg = cfg.get("cloud", {})
 
-    # 优先从环境变量读取 Service Account JSON (CI 环境)
-    sa_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
-    sa_file = cloud_cfg.get("service_account_file") or "config/gdrive_service_account.json"
-
+    # 上传器优先从环境变量读取 OAuth 凭证 (GDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN)
+    # 个人 Google 账号推荐 OAuth 方式, 文件存进你的 Drive, 使用你的配额
     uploader = GoogleDriveUploader(
-        service_account_json=sa_json,
-        service_account_file=sa_file if not sa_json else None,
         remote_dir=cloud_cfg.get("remote_dir", "/TelegramVideos"),
         delete_after_upload=cloud_cfg.get("delete_after_upload", True),
     )

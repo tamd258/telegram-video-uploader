@@ -40,19 +40,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # ---- Google Drive: 从 Secret 解码 Service Account JSON ----
-      - name: Setup Google Drive credentials
-        env:
-          GDRIVE_SA_B64: ${{ secrets.GDRIVE_SA_B64 }}
-        run: |
-          if [ -z "$GDRIVE_SA_B64" ]; then
-            echo "❌ GDRIVE_SA_B64 secret is not set"
-            exit 1
-          fi
-          echo "$GDRIVE_SA_B64" | base64 -d > config/gdrive_service_account.json
-          echo "✅ Google Drive Service Account JSON decoded"
-          python -c "import json; d=json.load(open('config/gdrive_service_account.json')); print(f'SA email: {d.get(\"client_email\", \"N/A\")}')"
-
       # ---- 下载 Telegram 视频 ----
       - name: Download Telegram videos
         env:
@@ -111,6 +98,9 @@ jobs:
       - name: Upload to Google Drive
         env:
           GDRIVE_FOLDER: ${{ github.event.inputs.gdrive_folder || secrets.GDRIVE_FOLDER || 'TelegramVideos' }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
         run: |
           if [ ! -f downloads/.filelist ]; then
             echo "No files to upload"
@@ -140,7 +130,6 @@ jobs:
               groups[source].append(p)
 
           uploader = GoogleDriveUploader(
-              service_account_file='config/gdrive_service_account.json',
               remote_dir='/' + base,
               delete_after_upload=True,
           )

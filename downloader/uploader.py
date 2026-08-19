@@ -1,6 +1,9 @@
 """
 Google Drive 上传器
-使用 Service Account 认证，支持大文件分块/断点续传
+优先使用 OAuth 用户凭证 (refresh token): 文件以你的个人 Google 账号身份上传,
+存进你的 Drive, 使用你的存储配额 (个人账号推荐, Service Account 无配额会 403)。
+Service Account 仅适用于 Google Workspace 账号。
+支持大文件分块/断点续传上传。
 """
 import os
 import json
@@ -8,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -16,13 +20,15 @@ logger = logging.getLogger(__name__)
 
 # Google Drive API scopes
 SCOPES = ["https://www.googleapis.com/auth/drive"]
+# OAuth token 刷新地址
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 # 分块大小 (10MB，适合大文件断点续传)
 DEFAULT_CHUNKSIZE = 10 * 1024 * 1024
 
 
 class GoogleDriveUploader:
-    """通过 Google Drive API 上传文件 (Service Account 认证)"""
+    """通过 Google Drive API 上传文件 (OAuth 用户凭证优先, Service Account 兜底)"""
 
     def __init__(
         self,
@@ -35,9 +41,15 @@ class GoogleDriveUploader:
         """
         初始化 Google Drive 上传器
 
+        认证优先级:
+          1. OAuth 用户凭证: 环境变量 GDRIVE_CLIENT_ID + GDRIVE_CLIENT_SECRET + GDRIVE_REFRESH_TOKEN
+             (个人 Google 账号推荐, 文件存进你的 Drive, 使用你的配额)
+          2. Service Account: service_account_json / service_account_file / GDRIVE_SERVICE_ACCOUNT_JSON
+             (仅适用于 Google Workspace 账号; 个人账号无配额会上传报 403)
+
         Args:
-            service_account_json: Service Account JSON 字符串 (CI 环境优先使用)
-            service_account_file: Service Account JSON 文件路径 (本地环境使用)
+            service_account_json: Service Account JSON 字符串
+            service_account_file: Service Account JSON 文件路径
             remote_dir: Google Drive 上的目标文件夹路径，如 /Folder1/SubFolder
             delete_after_upload: 上传成功后删除本地文件
             chunksize: 分块上传大小 (字节)
@@ -46,38 +58,61 @@ class GoogleDriveUploader:
         self.delete_after_upload = delete_after_upload
         self.chunksize = chunksize
 
-        # 加载 Service Account 凭证
-        if service_account_json:
+        # 1. 优先 OAuth 用户凭证 (个人账号推荐)
+        cid = os.environ.get("GDRIVE_CLIENT_ID")
+        csec = os.environ.get("GDRIVE_CLIENT_SECRET")
+        crt = os.environ.get("GDRIVE_REFRESH_TOKEN")
+        if cid and csec and crt:
+            self.credentials = Credentials(
+                token=None,
+                refresh_token=crt,
+                token_uri=TOKEN_URI,
+                client_id=cid,
+                client_secret=csec,
+                scopes=SCOPES,
+            )
+            self.auth_type = "oauth"
+            self.account = "personal (OAuth)"
+        # 2. Service Account 兜底 (Workspace 账号)
+        elif service_account_json:
             info = json.loads(service_account_json)
             self.credentials = service_account.Credentials.from_service_account_info(
                 info, scopes=SCOPES
             )
-            self.sa_email = info.get("client_email", "unknown")
+            self.account = info.get("client_email", "unknown")
         elif service_account_file:
             self.credentials = service_account.Credentials.from_service_account_file(
                 service_account_file, scopes=SCOPES
             )
             with open(service_account_file, "r") as f:
                 info = json.load(f)
-                self.sa_email = info.get("client_email", "unknown")
+                self.account = info.get("client_email", "unknown")
         else:
-            # 尝试从环境变量读取
             env_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
             if env_json:
                 info = json.loads(env_json)
                 self.credentials = service_account.Credentials.from_service_account_info(
                     info, scopes=SCOPES
                 )
-                self.sa_email = info.get("client_email", "unknown")
+                self.account = info.get("client_email", "unknown")
             else:
                 raise ValueError(
-                    "需要提供 service_account_json 或 service_account_file "
-                    "或设置 GDRIVE_SERVICE_ACCOUNT_JSON 环境变量"
+                    "需要 OAuth 环境变量 (GDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN) "
+                    "或 Service Account 凭证"
                 )
+
+        # 主动刷新一次 token, 提前验证 refresh_token 有效
+        if not self.credentials.valid:
+            try:
+                from google.auth.transport.requests import Request
+
+                self.credentials.refresh(Request())
+            except Exception as e:
+                raise ValueError(f"OAuth token 刷新失败, 请重新生成 refresh token: {e}")
 
         # static_discovery=True: 使用内置 discovery 文档, 无需额外请求 googleapis.com
         self.service = build("drive", "v3", credentials=self.credentials, static_discovery=True)
-        logger.info(f"Google Drive 上传器已初始化, SA: {self.sa_email}")
+        logger.info(f"Google Drive 上传器已初始化, 认证方式: {self.account}")
 
     def test_connection(self) -> bool:
         """测试 Google Drive 连接 (列出根目录文件)"""
@@ -97,8 +132,8 @@ class GoogleDriveUploader:
     ) -> Optional[str]:
         """按名称查找文件夹，返回 folder_id 或 None
 
-        include_shared=True 时查找"共享给 Service Account 的文件夹",
-        这样文件会直接上传到所有者的 Google Drive (而非 SA 自己的 Drive)
+        include_shared=True 时查找"共享给 Service Account 的文件夹"
+        (仅 Service Account 模式下用于定位共享目录; OAuth 个人模式用 root 查找)
         """
         safe_name = folder_name.replace("'", "\\'")
         query = (
@@ -139,22 +174,16 @@ class GoogleDriveUploader:
         """
         按路径获取或创建文件夹 (支持多级路径 /A/B/C)
         返回最深一级文件夹的 folder_id
+        使用 OAuth 个人身份时, 文件夹在 'root' (你的 Drive 根目录) 下查找/创建
         """
         if not path_str:
             return "root"
 
         parts = [p.strip() for p in path_str.split("/") if p.strip()]
-        parent_id = None  # None = root
+        parent_id = None  # None = root (你的 Drive 根目录)
 
-        for i, part in enumerate(parts):
-            if i == 0 and parent_id is None:
-                # 第一级: 优先找"共享给 SA"的文件夹 (文件直接进所有者 Drive)
-                folder_id = self._find_folder(part, include_shared=True)
-                if not folder_id:
-                    # 再找 SA 自己 Drive 根目录下的同名文件夹
-                    folder_id = self._find_folder(part, parent_id)
-            else:
-                folder_id = self._find_folder(part, parent_id)
+        for part in parts:
+            folder_id = self._find_folder(part, parent_id)
             if folder_id:
                 logger.debug(f"文件夹已存在: {part}")
             else:
