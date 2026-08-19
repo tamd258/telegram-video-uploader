@@ -105,11 +105,34 @@ async def run_pipeline():
         logger.error("无法连接到 Google Drive, 退出")
         sys.exit(1)
 
-    success, failed = uploader.upload_files(all_files)
-    logger.info(f"上传完成: 成功 {success}, 失败 {failed}")
+    # 按来源子目录分组上传: downloads/<来源>/<文件> → Drive/<remote_dir>/<来源>/
+    from collections import defaultdict
+
+    download_root = Path(download_dir)
+    groups = defaultdict(list)
+    for f in all_files:
+        f = Path(f)
+        try:
+            rel = f.relative_to(download_root)
+        except ValueError:
+            rel = f
+        source = rel.parts[0] if len(rel.parts) > 1 else ""
+        groups[source].append(f)
+
+    base_remote = cloud_cfg.get("remote_dir", "/TelegramVideos").rstrip("/")
+    total_success = 0
+    total_failed = 0
+    for source, group_files in groups.items():
+        remote = base_remote + ("/" + source if source else "")
+        logger.info(f"上传 [{source or '根目录'}] {len(group_files)} 个文件 → {remote}")
+        success, failed = uploader.upload_files(group_files, remote_dir=remote)
+        total_success += success
+        total_failed += failed
+
+    logger.info(f"上传完成: 成功 {total_success}, 失败 {total_failed}")
 
     # 3. 保存状态
-    if success > 0:
+    if total_success > 0:
         save_state(state)
         logger.info("状态已保存")
 

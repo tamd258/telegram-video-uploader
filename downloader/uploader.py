@@ -75,7 +75,8 @@ class GoogleDriveUploader:
                     "或设置 GDRIVE_SERVICE_ACCOUNT_JSON 环境变量"
                 )
 
-        self.service = build("drive", "v3", credentials=self.credentials, static_discovery=False)
+        # static_discovery=True: 使用内置 discovery 文档, 无需额外请求 googleapis.com
+        self.service = build("drive", "v3", credentials=self.credentials, static_discovery=True)
         logger.info(f"Google Drive 上传器已初始化, SA: {self.sa_email}")
 
     def test_connection(self) -> bool:
@@ -91,14 +92,23 @@ class GoogleDriveUploader:
             logger.error(f"Google Drive 连接失败: {e}")
             return False
 
-    def _find_folder(self, folder_name: str, parent_id: Optional[str] = None) -> Optional[str]:
-        """按名称查找文件夹，返回 folder_id 或 None"""
+    def _find_folder(
+        self, folder_name: str, parent_id: Optional[str] = None, include_shared: bool = False
+    ) -> Optional[str]:
+        """按名称查找文件夹，返回 folder_id 或 None
+
+        include_shared=True 时查找"共享给 Service Account 的文件夹",
+        这样文件会直接上传到所有者的 Google Drive (而非 SA 自己的 Drive)
+        """
+        safe_name = folder_name.replace("'", "\\'")
         query = (
-            f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' "
+            f"name = '{safe_name}' and mimeType = 'application/vnd.google-apps.folder' "
             f"and trashed = false"
         )
         if parent_id:
             query += f" and '{parent_id}' in parents"
+        elif include_shared:
+            query += " and sharedWithMe = true"
         else:
             query += " and 'root' in parents"
 
@@ -136,8 +146,15 @@ class GoogleDriveUploader:
         parts = [p.strip() for p in path_str.split("/") if p.strip()]
         parent_id = None  # None = root
 
-        for part in parts:
-            folder_id = self._find_folder(part, parent_id)
+        for i, part in enumerate(parts):
+            if i == 0 and parent_id is None:
+                # 第一级: 优先找"共享给 SA"的文件夹 (文件直接进所有者 Drive)
+                folder_id = self._find_folder(part, include_shared=True)
+                if not folder_id:
+                    # 再找 SA 自己 Drive 根目录下的同名文件夹
+                    folder_id = self._find_folder(part, parent_id)
+            else:
+                folder_id = self._find_folder(part, parent_id)
             if folder_id:
                 logger.debug(f"文件夹已存在: {part}")
             else:
@@ -146,9 +163,13 @@ class GoogleDriveUploader:
 
         return parent_id or "root"
 
-    def upload_files(self, files: list) -> tuple:
+    def upload_files(self, files: list, remote_dir: str = None) -> tuple:
         """
         上传文件列表到 Google Drive
+
+        Args:
+            files: 本地文件路径列表
+            remote_dir: 目标文件夹路径 (可选, 覆盖默认值; 用于按来源分目录上传)
 
         Returns:
             (success_count, failed_count)
@@ -156,9 +177,10 @@ class GoogleDriveUploader:
         success = 0
         failed = 0
 
+        target_dir = (remote_dir or self.remote_dir).strip("/")
         # 确保目标文件夹存在
-        folder_id = self._get_or_create_folder_path(self.remote_dir)
-        logger.info(f"目标文件夹: {self.remote_dir} (id={folder_id})")
+        folder_id = self._get_or_create_folder_path(target_dir)
+        logger.info(f"目标文件夹: {target_dir} (id={folder_id})")
 
         for file_path in files:
             file_path = Path(file_path)
@@ -225,8 +247,9 @@ class GoogleDriveUploader:
 
     def _file_exists(self, file_name: str, folder_id: str) -> bool:
         """检查 Google Drive 上指定文件夹中是否已存在同名文件"""
+        safe_name = file_name.replace("'", "\\'")
         query = (
-            f"name = '{file_name}' and trashed = false "
+            f"name = '{safe_name}' and trashed = false "
             f"and '{folder_id}' in parents"
         )
         try:

@@ -7,40 +7,76 @@
 ```
 Telegram API (Pyrogram)
        ↓ 下载视频 (每次最多12GB, 跳过>2GB单文件)
-  本地 downloads/
+  本地 downloads/<来源>/
        ↓ Google Drive API (Service Account)
-  Google Drive ☁️  (文件夹: /TelegramVideos)
+  Google Drive ☁️  (TelegramVideos/<来源>/)
 ```
 
 ## 功能
 
-- ✅ 批量下载 Telegram 频道/群组视频
+- ✅ 批量下载 Telegram 频道/群组/收藏(Saved Messages)视频
+- ✅ **按来源自动分目录**：收藏 → `TelegramVideos/我的收藏/`，频道 → `TelegramVideos/<频道名>/`
 - ✅ 单文件 >2GB 自动跳过
 - ✅ 每轮总量达 12GB 自动停止
 - ✅ 通过 Google Drive API 直接上传 (Service Account 认证, 支持大文件分块/断点续传)
+- ✅ 上传到"共享给 SA"的文件夹 (文件直接进你的 Google Drive, 网页立即可见)
 - ✅ 上传成功自动删除本地文件
 - ✅ 同名文件自动跳过 (防重复上传)
 - ✅ GitHub Actions 定时/手动运行
-- ✅ Session 持久化，无需每次登录
+- ✅ Session 持久化 (Secret + artifact 双保险), 无需每次登录
 
 ## GitHub Secrets 配置
 
-在仓库 `Settings → Secrets and variables → Actions` 添加 **4 个 Secrets**：
+在仓库 `Settings → Secrets and variables → Actions` 添加 **5 个 Secrets**：
 
 | Secret | 说明 | 获取方式 |
 |--------|------|----------|
 | `TG_API_ID` | Telegram API ID（纯数字） | [my.telegram.org/apps](https://my.telegram.org/apps) → API development tools |
 | `TG_API_HASH` | Telegram API Hash | 同上 |
-| `TG_CHAT_IDS` | 频道/群组 ID，多个用英文逗号分隔 | 公开频道写 `@频道名`；私有频道转发给 `@username_to_id_bot` 获取数字 ID |
+| `TG_CHAT_IDS` | 频道/群组/收藏 ID，多个用英文逗号分隔 | 收藏填 `me`；公开频道写 `@频道名`；私有频道转发消息给 `@username_to_id_bot` 获取数字 ID |
+| `TG_SESSION_B64` | Telegram session 文件 (base64 编码) | 本地跑一次 `scripts/login.py` 生成, 见下方步骤 |
 | `GDRIVE_SA_B64` | Google Drive Service Account JSON (base64 编码) | 见下方详细步骤 |
 
 ### `TG_CHAT_IDS` 格式示例
 ```
-@channel_name
+me                              # 只拷贝收藏 (Saved Messages)
 ```
 或
 ```
-@channel1,@channel2,-1001234567890
+@channel1,-1001234567890,me     # 频道 + 私有频道 + 收藏, 逗号分隔
+```
+
+### 生成 `TG_SESSION_B64` 详细步骤
+
+GitHub Actions 无法交互输入手机验证码, 所以首次必须**本地登录一次**:
+
+1. 本地安装依赖: `pip install -r requirements.txt`
+2. 设置环境变量并登录 (在项目根目录执行):
+
+```powershell
+# Windows PowerShell
+$env:TG_API_ID = "你的API_ID"
+$env:TG_API_HASH = "你的API_HASH"
+python scripts/login.py
+```
+```bash
+# Linux / macOS
+export TG_API_ID=你的API_ID
+export TG_API_HASH=你的API_HASH
+python scripts/login.py
+```
+
+3. 按提示输入手机号 (带国家码) 和 Telegram 验证码, 成功后生成 `downloader.session` 文件
+4. base64 编码并添加为 Secret `TG_SESSION_B64`:
+
+**Windows PowerShell:**
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("downloader.session"))
+```
+
+**Linux / macOS / Git Bash:**
+```bash
+base64 -w 0 downloader.session
 ```
 
 ### 获取 `GDRIVE_SA_B64` 详细步骤
@@ -72,6 +108,8 @@ Telegram API (Pyrogram)
 3. 右键该文件夹 → **Share**
 4. 粘贴 Service Account 的邮箱地址 (形如 `xxx@your-project.iam.gserviceaccount.com`，在 JSON 文件的 `client_email` 字段)
 5. 权限选 **Editor**，点击 **Share**
+
+> 💡 这一步很关键：上传时优先使用你共享给 SA 的文件夹，文件**直接进你的 Google Drive**（网页立即可见）；如果没共享，文件会落到 SA 自己的 15GB 网盘里，你网页上看不到。
 
 #### 5. Base64 编码并添加为 GitHub Secret
 
@@ -113,7 +151,18 @@ bash scripts/run.sh
 
 ## 首次运行注意事项
 
-首次运行 Pyrogram 需要在 **GitHub Actions 日志**中输入手机号和 Telegram 验证码（日志可交互输入）。之后会自动保存 session，无需重复登录。
+- ⚠️ **GitHub Actions 无法交互输入验证码**，首次运行前必须先本地跑 `scripts/login.py` 生成 session 并配置 `TG_SESSION_B64` Secret（见上文步骤）
+- 之后每次运行会自动保存最新 session 到 artifact (保留 7 天)；artifact 过期后会自动回退用 `TG_SESSION_B64` 恢复，永不掉线
+- Telegram 登录后频繁在不同 IP 登录可能触发风控，session 复用可避免此问题
+
+## 分目录规则
+
+上传到 Google Drive 时按来源自动分目录：
+
+| 来源 | 本地目录 | Google Drive 目录 |
+|------|---------|------------------|
+| 收藏 (Saved Messages, `me`) | `downloads/我的收藏/` | `TelegramVideos/我的收藏/` |
+| 频道/群组 | `downloads/<频道名或ID>/` | `TelegramVideos/<频道名或ID>/` |
 
 ## 文件说明
 
@@ -126,7 +175,8 @@ telegram-video-uploader/
 │   └── uploader.py                         # Google Drive API 上传
 ├── main.py                                 # 本地运行入口
 ├── scripts/
-│   └── run.sh                              # 本地一键运行
+│   ├── run.sh                              # 本地一键运行
+│   └── login.py                            # 本地登录生成 session (首次必跑)
 ├── config/
 │   ├── config.yaml.example                 # 主配置模板
 │   └── gdrive_service_account.json.example # Service Account 模板 (参考)

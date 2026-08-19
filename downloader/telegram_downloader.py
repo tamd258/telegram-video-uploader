@@ -84,6 +84,21 @@ class TelegramVideoDownloader:
         self.tracker = SizeTracker(int(max_total_size_gb * 1024 ** 3))
         self.max_single = int(skip_larger_than_gb * 1024 ** 3)
 
+    async def _resolve_source_name(self, client, chat_id) -> str:
+        """把 chat_id 解析为友好的目录名 (用于分目录存放)"""
+        s = str(chat_id).strip()
+        if s.lower() in ("me", "self"):
+            return "我的收藏"
+        name = s
+        try:
+            chat = await client.get_chat(chat_id)
+            name = chat.title or chat.first_name or chat.username or s
+        except Exception as e:
+            logger.warning(f"解析 chat 名称失败 ({chat_id}): {e}, 使用原始 ID 作为目录名")
+        # 清理路径非法字符
+        name = "".join(c for c in str(name) if c not in '\\/:*?"<>|').strip()
+        return name or s
+
     async def download_chat_videos(
         self,
         chat_id: str,
@@ -99,7 +114,11 @@ class TelegramVideoDownloader:
             api_hash=self.api_hash,
             workdir=str(self.download_dir.parent),
         ) as client:
-            logger.info(f"开始扫描: {chat_id}")
+            # 分目录: 每个 chat 的文件存到 downloads/<来源名>/ 子目录
+            source_name = await self._resolve_source_name(client, chat_id)
+            source_dir = self.download_dir / source_name
+            source_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"开始扫描: {chat_id} → 存放目录: {source_name}")
 
             async for message in client.get_chat_history(
                 chat_id=chat_id,
@@ -129,7 +148,7 @@ class TelegramVideoDownloader:
                     break
 
                 # 跳过已存在的文件
-                dest_path = self.download_dir / file_name
+                dest_path = source_dir / file_name
                 if dest_path.exists() and dest_path.stat().st_size == file_size:
                     logger.info(f"已存在跳过: {file_name}")
                     self.tracker.add(file_size)

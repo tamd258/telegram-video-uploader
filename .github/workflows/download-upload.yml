@@ -38,6 +38,24 @@ jobs:
         with:
           name: telegram-session
 
+      # ---- 从 Secret 恢复 session (首次运行 / artifact 过期时) ----
+      - name: Restore Telegram session from secret
+        env:
+          TG_SESSION_B64: ${{ secrets.TG_SESSION_B64 }}
+        run: |
+          if [ -f downloader.session ]; then
+            echo "✅ session restored from artifact"
+            exit 0
+          fi
+          if [ -z "$TG_SESSION_B64" ]; then
+            echo "⚠️ No session artifact and TG_SESSION_B64 secret not set"
+            echo "⚠️ 首次运行会因无法交互登录而失败!"
+            echo "⚠️ 请先本地运行 scripts/login.py 生成 session, base64 后添加 Secret TG_SESSION_B64"
+            exit 0
+          fi
+          echo "$TG_SESSION_B64" | base64 -d > downloader.session
+          echo "✅ session restored from TG_SESSION_B64 secret"
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -109,7 +127,7 @@ jobs:
           asyncio.run(main())
           "
 
-      # ---- 上传到 Google Drive ----
+      # ---- 上传到 Google Drive (按来源分目录) ----
       - name: Upload to Google Drive
         env:
           GDRIVE_FOLDER: ${{ github.event.inputs.gdrive_folder || secrets.GDRIVE_FOLDER || 'TelegramVideos' }}
@@ -122,19 +140,28 @@ jobs:
           python -c "
           import os
           from pathlib import Path
+          from collections import defaultdict
           from downloader.uploader import GoogleDriveUploader
 
-          filelist = Path('downloads/.filelist').read_text().strip().split('\\n')
+          filelist = Path('downloads/.filelist').read_text().strip().split('\n')
           files = [Path(f) for f in filelist if f and Path(f).exists()]
           print(f'Uploading {len(files)} files to Google Drive')
 
-          folder = os.environ.get('GDRIVE_FOLDER', 'TelegramVideos')
-          if not folder.startswith('/'):
-              folder = '/' + folder
+          base = os.environ.get('GDRIVE_FOLDER', 'TelegramVideos').strip('/')
+
+          # 按来源子目录分组: downloads/<来源>/<文件>
+          groups = defaultdict(list)
+          for p in files:
+              try:
+                  rel = p.relative_to(Path('downloads'))
+              except ValueError:
+                  rel = p
+              source = rel.parts[0] if len(rel.parts) > 1 else ''
+              groups[source].append(p)
 
           uploader = GoogleDriveUploader(
               service_account_file='config/gdrive_service_account.json',
-              remote_dir=folder,
+              remote_dir='/' + base,
               delete_after_upload=True,
           )
 
@@ -142,10 +169,19 @@ jobs:
               print('❌ Cannot connect to Google Drive')
               exit(1)
 
-          success, failed = uploader.upload_files(files)
-          print(f'☁️ Google Drive upload: {success} success, {failed} failed')
+          total_success = 0
+          total_failed = 0
+          for source, group_files in groups.items():
+              sub = base + ('/' + source if source else '')
+              label = source if source else '根目录'
+              print(f'📤 [{label}] {len(group_files)} 个文件 → /{sub}')
+              success, failed = uploader.upload_files(group_files, remote_dir=sub)
+              total_success += success
+              total_failed += failed
 
-          if failed > 0:
+          print(f'☁️ Google Drive upload: {total_success} success, {total_failed} failed')
+
+          if total_failed > 0:
               exit(1)
           "
 
