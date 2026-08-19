@@ -113,7 +113,22 @@ python scripts/login.py
 3. 应用类型选 **桌面应用 / Desktop app**
 4. 创建后复制 **Client ID** 和 **Client Secret**（下一步要用）
 
-#### 4. 生成 Refresh Token (用 Google Colab, 本机连不上 Google 时用)
+#### 4. 生成 Refresh Token
+
+> 两种方式任选其一。本机能连 Google 的机器**推荐方式 A**（自动开浏览器、自动回调，最省事）。
+
+**方式 A：本地脚本（本机能连 Google，推荐）**
+
+1. 本机安装依赖: `pip install google-auth-oauthlib`
+2. 在项目目录运行: `python scripts/oauth_local.py`
+3. 按提示输入上面复制的 **Client ID** 和 **Client Secret**
+4. 脚本自动打开浏览器 → 用你的 Google 账号登录并授权 → 自动回调
+5. 脚本打印三个值, 分别添加为 GitHub Secret：
+   - `GDRIVE_CLIENT_ID` = 你的 Client ID
+   - `GDRIVE_CLIENT_SECRET` = 你的 Client Secret
+   - `GDRIVE_REFRESH_TOKEN` = 打印的 refresh token
+
+**方式 B：Google Colab（本机连不上 Google 时用）**
 
 1. 打开 [Google Colab](https://colab.research.google.com) → 新建笔记本
 2. 第一个 cell 运行: `!pip install -q google-api-python-client google-auth-oauthlib`
@@ -121,10 +136,7 @@ python scripts/login.py
 4. 按提示输入刚复制的 **Client ID** 和 **Client Secret**
 5. 脚本打印一个授权链接 → **浏览器打开** → 用你自己的 Google 账号登录并授权 →
    复制页面上的 `code` 粘贴回 Colab
-6. 脚本打印三个值, 分别添加为 GitHub Secret：
-   - `GDRIVE_CLIENT_ID` = 你的 Client ID
-   - `GDRIVE_CLIENT_SECRET` = 你的 Client Secret
-   - `GDRIVE_REFRESH_TOKEN` = 打印的 refresh token
+6. 脚本打印三个值, 分别添加为 GitHub Secret（同方式 A 的三个）
 
 ## 运行
 
