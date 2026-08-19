@@ -1,10 +1,11 @@
 # config.yaml 仅用于本地运行
-# GitHub Actions 中通过 Secrets (TG_API_ID / TG_API_HASH / TG_CHAT_IDS) 注入
+# GitHub Actions 中通过 Secrets (TG_API_ID / TG_API_HASH / TG_CHAT_IDS / GDRIVE_SA_B64) 注入
 #
 # 本地使用步骤:
 #   1. 复制此文件为 config/config.yaml
 #   2. 填入真实值
-#   3. 运行 bash scripts/run.sh
+#   3. 将 Google Drive Service Account JSON 放到 config/gdrive_service_account.json
+#   4. 运行 python main.py
 
 telegram:
   api_id: 12345678                       # ← 替换
@@ -20,8 +21,8 @@ max_total_size_gb: 12.0
 skip_larger_than_gb: 2.0
 
 cloud:
-  rclone_remote: "mcloud"
-  remote_dir: "/aaa"
+  service_account_file: "config/gdrive_service_account.json"
+  remote_dir: "/TelegramVideos"           # Google Drive 目标文件夹路径
   delete_after_upload: true
 
 log_level: "INFO"

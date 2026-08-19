@@ -8,6 +8,11 @@ on:
         required: false
         default: '12'
         type: string
+      gdrive_folder:
+        description: 'Google Drive 目标文件夹路径'
+        required: false
+        default: 'TelegramVideos'
+        type: string
 
   schedule:
     # 每6小时 (北京时间 02:00, 08:00, 14:00, 20:00)
@@ -42,89 +47,19 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # ---- alist: 中国移动云盘 WebDAV 桥 ----
-      - name: Setup alist
+      # ---- Google Drive: 从 Secret 解码 Service Account JSON ----
+      - name: Setup Google Drive credentials
         env:
-          MCLOUD_AUTH: ${{ secrets.MCLOUD_AUTHORIZATION }}
-          ALIST_PASSWORD: ${{ secrets.ALIST_ADMIN_PASSWORD }}
+          GDRIVE_SA_B64: ${{ secrets.GDRIVE_SA_B64 }}
         run: |
-          ALIST_VERSION="3.42.0"
-          mkdir -p /tmp/alist
-          curl -fsSL "https://github.com/AlistGo/alist/releases/download/v${ALIST_VERSION}/alist-linux-amd64.tar.gz" \
-            -o /tmp/alist.tar.gz
-          tar -xzf /tmp/alist.tar.gz -C /tmp/alist
-          chmod +x /tmp/alist/alist
-
-          # 动态生成 alist config.json (只需改 authorization 字段)
-          mkdir -p /tmp/alist/data
-          cat > /tmp/alist/data/config.json << JSONEOF
-          {
-            "force": false,
-            "site_url": "",
-            "cdn": "",
-            "jwt_secret": "random_$(date +%s)",
-            "token_expires_in": 48,
-            "scheme": {
-              "address": "0.0.0.0",
-              "http_port": 5244,
-              "https_port": -1,
-              "force_https": false,
-              "cert_file": "",
-              "key_file": ""
-            },
-            "temp_dir": "data/temp",
-            "log": {
-              "enable": true,
-              "name": "data/log/log.log",
-              "max_size": 50,
-              "max_backups": 30,
-              "max_age": 28,
-              "compress": false
-            },
-            "max_connections": 0,
-            "tls_insecure_skip_verify": false,
-            "storages": [
-              {
-                "driver": "139",
-                "mount_path": "/mcloud",
-                "type": "new_cloud",
-                "authorization": "$MCLOUD_AUTH",
-                "root_folder_id": "",
-                "cloud_id": "",
-                "upload_part_size": 20971520,
-                "remove_way": "trash",
-                "webdav_policy": "native_proxy",
-                "webdav_proxy": true
-              }
-            ]
-          }
-          JSONEOF
-
-          # 设置管理员密码 & 启动
-          cd /tmp/alist
-          ./alist admin set "$ALIST_PASSWORD"
-          nohup ./alist server > /tmp/alist.log 2>&1 &
-          echo "alist PID: $!"
-
-          sleep 5
-          if curl -s http://localhost:5244/api/public/settings > /dev/null; then
-            echo "✅ alist started"
-          else
-            echo "❌ alist failed to start"
-            cat /tmp/alist.log
+          if [ -z "$GDRIVE_SA_B64" ]; then
+            echo "❌ GDRIVE_SA_B64 secret is not set"
             exit 1
           fi
-
-      # ---- rclone: 通过 WebDAV 连接 alist ----
-      - name: Setup rclone
-        env:
-          ALIST_PASSWORD: ${{ secrets.ALIST_ADMIN_PASSWORD }}
-        run: |
-          curl -fsSL https://rclone.org/install.sh | sudo bash
-          mkdir -p ~/.config/rclone
-          printf '[mcloud]\ntype = webdav\nurl = http://localhost:5244/dav\nvendor = other\nuser = admin\npass = %s\n' \
-            "$ALIST_PASSWORD" > ~/.config/rclone/rclone.conf
-          rclone lsd mcloud: || echo "⚠️ 云盘目录为空或首次使用"
+          echo "$GDRIVE_SA_B64" | base64 -d > config/gdrive_service_account.json
+          echo "✅ Google Drive Service Account JSON decoded"
+          # 提取 SA 邮箱用于日志确认
+          python -c "import json; d=json.load(open('config/gdrive_service_account.json')); print(f'SA email: {d.get(\"client_email\", \"N/A\")}')"
 
       # ---- 下载 Telegram 视频 ----
       - name: Download Telegram videos
@@ -174,8 +109,10 @@ jobs:
           asyncio.run(main())
           "
 
-      # ---- 上传到中国移动云盘 ----
-      - name: Upload to cloud
+      # ---- 上传到 Google Drive ----
+      - name: Upload to Google Drive
+        env:
+          GDRIVE_FOLDER: ${{ github.event.inputs.gdrive_folder || secrets.GDRIVE_FOLDER || 'TelegramVideos' }}
         run: |
           if [ ! -f downloads/.filelist ]; then
             echo "No files to upload"
@@ -183,25 +120,33 @@ jobs:
           fi
 
           python -c "
+          import os
           from pathlib import Path
-          from downloader.uploader import RcloneUploader
+          from downloader.uploader import GoogleDriveUploader
 
           filelist = Path('downloads/.filelist').read_text().strip().split('\\n')
           files = [Path(f) for f in filelist if f and Path(f).exists()]
-          print(f'Uploading {len(files)} files')
+          print(f'Uploading {len(files)} files to Google Drive')
 
-          uploader = RcloneUploader(
-              remote_name='mcloud',
-              remote_dir='/aaa',
+          folder = os.environ.get('GDRIVE_FOLDER', 'TelegramVideos')
+          if not folder.startswith('/'):
+              folder = '/' + folder
+
+          uploader = GoogleDriveUploader(
+              service_account_file='config/gdrive_service_account.json',
+              remote_dir=folder,
               delete_after_upload=True,
           )
 
           if not uploader.test_connection():
-              print('❌ Cannot connect to cloud drive')
+              print('❌ Cannot connect to Google Drive')
               exit(1)
 
           success, failed = uploader.upload_files(files)
-          print(f'☁️ Upload: {success} success, {failed} failed')
+          print(f'☁️ Google Drive upload: {success} success, {failed} failed')
+
+          if failed > 0:
+              exit(1)
           "
 
       # ---- 保存 session 供下次复用 ----

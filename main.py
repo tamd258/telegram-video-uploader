@@ -1,6 +1,6 @@
 """
-主入口：下载 Telegram 视频 → 上传到中国移动云盘
-适用于 GitHub Actions 环境
+主入口：下载 Telegram 视频 → 上传到 Google Drive
+适用于 GitHub Actions 环境和本地运行
 """
 import os
 import sys
@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from downloader.telegram_downloader import TelegramVideoDownloader
-from downloader.uploader import RcloneUploader, setup_rclone_for_alist
+from downloader.uploader import GoogleDriveUploader
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +46,7 @@ async def run_pipeline():
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    # 1. 配置 rclone 连接 alist WebDAV
-    logger.info("=== 配置 rclone ===")
-    alist_url = os.environ.get("ALIST_WEBDAV_URL", "http://localhost:5244/dav")
-    setup_rclone_for_alist("config/rclone.conf", alist_url)
-
-    # 2. 下载 Telegram 视频
+    # 1. 下载 Telegram 视频
     logger.info("=== 开始下载 Telegram 视频 ===")
     download_dir = cfg.get("download_dir", "./downloads")
     Path(download_dir).mkdir(parents=True, exist_ok=True)
@@ -75,17 +70,15 @@ async def run_pipeline():
         last_id = state.get(str(chat_id), chat_cfg.get("last_message_id", 0))
 
         logger.info(f"处理频道: {chat_id}, 从消息 {last_id} 开始")
-        files = await downloader.download_chat_videos(
+        files, latest_id = await downloader.download_chat_videos(
             chat_id=chat_id,
             last_message_id=last_id,
         )
         all_files.extend(files)
 
-        # 更新状态 (记录已下载到的最新消息 ID)
-        if files:
-            # 实际上需要记录扫描过的最新消息 ID
-            # 这里简化处理，实际使用时应从下载循环中获取
-            pass
+        # 更新状态
+        if latest_id > 0:
+            state[str(chat_id)] = latest_id
 
     logger.info(f"下载完成: {len(all_files)} 个文件, {downloader.tracker.downloaded_gb:.2f}GB")
 
@@ -93,23 +86,29 @@ async def run_pipeline():
         logger.info("没有新文件需要下载")
         return
 
-    # 3. 上传到移动云盘
-    logger.info("=== 开始上传到中国移动云盘 ===")
-    uploader = RcloneUploader(
-        remote_name=cfg["cloud"].get("rclone_remote", "mcloud"),
-        remote_dir=cfg["cloud"].get("remote_dir", "/aaa"),
-        rclone_config="config/rclone.conf",
-        delete_after_upload=cfg["cloud"].get("delete_after_upload", True),
+    # 2. 上传到 Google Drive
+    logger.info("=== 开始上传到 Google Drive ===")
+    cloud_cfg = cfg.get("cloud", {})
+
+    # 优先从环境变量读取 Service Account JSON (CI 环境)
+    sa_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
+    sa_file = cloud_cfg.get("service_account_file") or "config/gdrive_service_account.json"
+
+    uploader = GoogleDriveUploader(
+        service_account_json=sa_json,
+        service_account_file=sa_file if not sa_json else None,
+        remote_dir=cloud_cfg.get("remote_dir", "/TelegramVideos"),
+        delete_after_upload=cloud_cfg.get("delete_after_upload", True),
     )
 
     if not uploader.test_connection():
-        logger.error("无法连接到云盘, 退出")
+        logger.error("无法连接到 Google Drive, 退出")
         sys.exit(1)
 
     success, failed = uploader.upload_files(all_files)
     logger.info(f"上传完成: 成功 {success}, 失败 {failed}")
 
-    # 4. 清理
+    # 3. 保存状态
     if success > 0:
         save_state(state)
         logger.info("状态已保存")

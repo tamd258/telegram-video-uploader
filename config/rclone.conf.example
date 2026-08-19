@@ -1,6 +1,0 @@
-[mcloud]
-type = webdav
-url = http://localhost:5244/dav
-vendor = other
-user = admin
-pass = admin
