@@ -72,6 +72,16 @@ python scripts/login.py
 
 > ⚠️ 复制时要从开头到结尾**完整**复制, 漏一个字符都会导致登录失败。
 
+#### 方式二: 用 Google Colab (推荐, 无需本地装任何东西)
+
+如果本地无法连接 Telegram, 用浏览器在 Google Colab 上生成 (Google 服务器在海外, 能连 Telegram):
+
+1. 打开 [Google Colab](https://colab.research.google.com) → 新建笔记本
+2. 第一个 cell 输入并运行: `!pip install -q pyrogram tgcrypto`
+3. 第二个 cell 把项目里 `scripts/login_colab.py` 的**全部内容**粘贴进去, 运行
+4. 按提示输入 API ID、API Hash、手机号, 等 Telegram 验证码, 输入验证码
+5. 复制打印出的 session 字符串 → 填入 Secret `TG_SESSION_STRING`
+
 ### 获取 `GDRIVE_SA_B64` 详细步骤
 
 #### 1. 创建 Google Cloud 项目 & 启用 Drive API
