@@ -1,5 +1,5 @@
 """
-主入口：下载 Telegram 视频 → 上传到 Google Drive
+主入口：下载 Telegram 视频 → 上传到 OneDrive2 (Microsoft Graph API)
 适用于 GitHub Actions 环境和本地运行
 """
 import os
@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from downloader.telegram_downloader import TelegramVideoDownloader
-from downloader.uploader import GoogleDriveUploader
+from downloader.onedrive_uploader import OneDriveUploader
 
 logger = logging.getLogger(__name__)
 
@@ -86,19 +86,19 @@ async def run_pipeline():
         logger.info("没有新文件需要下载")
         return
 
-    # 2. 上传到 Google Drive
-    logger.info("=== 开始上传到 Google Drive ===")
+    # 2. 上传到 OneDrive2 (Microsoft Graph)
+    logger.info("=== 开始上传到 OneDrive2 ===")
     cloud_cfg = cfg.get("cloud", {})
 
-    # 上传器优先从环境变量读取 OAuth 凭证 (GDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN)
-    # 个人 Google 账号推荐 OAuth 方式, 文件存进你的 Drive, 使用你的配额
-    uploader = GoogleDriveUploader(
+    # 上传器从环境变量读取凭证 (OD_CLIENT_ID / OD_CLIENT_SECRET / OD_REFRESH_TOKEN)
+    # OneDrive2 账号 = yanfatd@gmail.com, 由 OD_REFRESH_TOKEN 决定
+    uploader = OneDriveUploader(
         remote_dir=cloud_cfg.get("remote_dir", "/TelegramVideos"),
         delete_after_upload=cloud_cfg.get("delete_after_upload", True),
     )
 
     if not uploader.test_connection():
-        logger.error("无法连接到 Google Drive, 退出")
+        logger.error("无法连接到 OneDrive2, 退出")
         sys.exit(1)
 
     # 按来源子目录分组上传: downloads/<来源>/<文件> → Drive/<remote_dir>/<来源>/

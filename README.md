@@ -1,6 +1,6 @@
 # Telegram Video Uploader
 
-批量下载 Telegram 频道/群组视频 → 自动上传到 Google Drive
+批量下载 Telegram 频道/群组视频 → 自动上传到 OneDrive2
 
 ## 架构
 
@@ -8,8 +8,8 @@
 Telegram API (Pyrogram)
        ↓ 下载视频 (每次最多12GB, 跳过>2GB单文件)
   本地 downloads/<来源>/
-       ↓ Google Drive API (OAuth 用户凭证, 用你的配额)
-  Google Drive ☁️  (TelegramVideos/<来源>/)
+       ↓ Microsoft Graph API (OAuth refresh token, 用 OneDrive2 的配额)
+  OneDrive2 ☁️  (TelegramVideos/<来源>/)   账号: yanfatd@gmail.com (1TB)
 ```
 
 ## 功能
@@ -18,8 +18,8 @@ Telegram API (Pyrogram)
 - ✅ **按来源自动分目录**：收藏 → `TelegramVideos/我的收藏/`，频道 → `TelegramVideos/<频道名>/`
 - ✅ 单文件 >2GB 自动跳过
 - ✅ 每轮总量达 12GB 自动停止
-- ✅ 通过 Google Drive API 直接上传 (OAuth 用户凭证认证, 用你的存储配额, 支持大文件分块/断点续传)
-- ✅ 文件直接进你**自己的 Google Drive** (`TelegramVideos` 文件夹, 网页立即可见)
+- ✅ 通过 Microsoft Graph API 直接上传 (refresh token 认证, 用 OneDrive2 的 1TB 配额, 支持大文件分块上传)
+- ✅ 文件直接进 **OneDrive2 的 `TelegramVideos` 文件夹** (网页立即可见)
 - ✅ 上传成功自动删除本地文件
 - ✅ 同名文件自动跳过 (防重复上传)
 - ✅ GitHub Actions 定时/手动运行
@@ -35,9 +35,9 @@ Telegram API (Pyrogram)
 | `TG_API_HASH` | Telegram API Hash | 同上 |
 | `TG_CHAT_IDS` | 频道/群组/收藏 ID，多个用英文逗号分隔 | 收藏填 `me`；公开频道写 `@频道名`；私有频道转发消息给 `@username_to_id_bot` 获取数字 ID |
 | `TG_SESSION_STRING` | Telegram 字符串会话 (纯文本, 不用 base64) | 本地跑一次 `scripts/login.py` 登录, 把打印的字符串填进来, 见下方步骤 |
-| `GDRIVE_CLIENT_ID` | Google OAuth Client ID | 见下方"获取 Google Drive OAuth 凭证"步骤 |
-| `GDRIVE_CLIENT_SECRET` | Google OAuth Client Secret | 同上 |
-| `GDRIVE_REFRESH_TOKEN` | Google OAuth Refresh Token | 同上 (用 `scripts/oauth_colab.py` 生成) |
+| `OD_CLIENT_ID` | Azure 应用 Client ID | `72a71033-c691-4fcf-8048-4597c39ccdf8` (alist 公共 app) |
+| `OD_CLIENT_SECRET` | Azure 应用 Client Secret | 同一 Azure 应用的密钥 |
+| `OD2_REFRESH_TOKEN` | OneDrive2 的 refresh token | 从本地 alist 数据库 `x_storages` 表 `mount_path='/OneDrive2'` 的 `addition` JSON 里提取 `refresh_token` 字段 |
 
 ### `TG_CHAT_IDS` 格式示例
 ```
@@ -84,66 +84,29 @@ python scripts/login.py
 4. 按提示输入 API ID、API Hash、手机号, 等 Telegram 验证码, 输入验证码
 5. 复制打印出的 session 字符串 → 填入 Secret `TG_SESSION_STRING`
 
-### 获取 Google Drive OAuth 凭证 (GDRIVE_CLIENT_ID / SECRET / REFRESH_TOKEN)
+### 获取 OneDrive2 凭证 (OD_CLIENT_ID / OD_CLIENT_SECRET / OD2_REFRESH_TOKEN)
 
-> ⚠️ **为什么用 OAuth 而不是 Service Account？** 个人 Google 账号的 Service Account
-> **没有存储配额**，上传必报 `403 storageQuotaExceeded`。OAuth 用你自己的账号上传，
-> 文件存进你的 Drive、用你的 15GB 配额，才能正常上传。
+> OneDrive2 = **yanfatd@gmail.com** 的个人 OneDrive (1TB 配额)。
+> 认证走 Azure 应用 (alist 公共 app) 的 OAuth refresh token。
 
-#### 1. 创建 Google Cloud 项目 & 启用 Drive API
+1. **Client ID / Secret**：已有，即 `72a71033-c691-4fcf-8048-4597c39ccdf8` 和它的密钥
+   （与本地 alist 挂载 OneDrive2 用的是同一个 Azure 应用）
+2. **Refresh Token**：从本地 alist 数据库提取：
+   - 数据库文件: `%USERPROFILE%\Downloads\alist\data\data.db`
+   - SQL: `SELECT addition FROM x_storages WHERE mount_path='/OneDrive2'`
+   - `addition` 是 JSON，取 `refresh_token` 字段填入 Secret `OD2_REFRESH_TOKEN`
+3. token 过期时（Actions 报 401/invalid_grant）重新走一遍 alist 的 OneDrive 授权，
+   再从数据库提取新 token 更新 Secret 即可
 
-1. 打开 [Google Cloud Console](https://console.cloud.google.com/)
-2. 点击顶部项目选择器 → **新建项目** (或选择已有项目)
-3. 进入 **APIs & Services → Library**，搜索 **Google Drive API**，点击 **Enable**
-
-#### 2. 配置 OAuth 同意屏幕
-
-1. 进入 **APIs & Services → OAuth consent screen**
-2. 用户类型选 **外部 / External**，点击 **Create**
-3. 填写应用名称 (如 `telegram-uploader`)、用户支持邮箱、开发者邮箱
-4. 到 **Test users（测试用户）** 步骤，把**你自己的 Google 账号**添加为测试用户
-5. 保存
-
-> 💡 应用未发布时必须把自己加为测试用户，否则授权时会报"应用未验证"。
-
-#### 3. 创建 OAuth Client ID
-
-1. 进入 **APIs & Services → Credentials**
-2. 点击 **Create Credentials → OAuth client ID**
-3. 应用类型选 **桌面应用 / Desktop app**
-4. 创建后复制 **Client ID** 和 **Client Secret**（下一步要用）
-
-#### 4. 生成 Refresh Token
-
-> 两种方式任选其一。本机能连 Google 的机器**推荐方式 A**（自动开浏览器、自动回调，最省事）。
-
-**方式 A：本地脚本（本机能连 Google，推荐）**
-
-1. 本机安装依赖: `pip install google-auth-oauthlib`
-2. 在项目目录运行: `python scripts/oauth_local.py`
-3. 按提示输入上面复制的 **Client ID** 和 **Client Secret**
-4. 脚本自动打开浏览器 → 用你的 Google 账号登录并授权 → 自动回调
-5. 脚本打印三个值, 分别添加为 GitHub Secret：
-   - `GDRIVE_CLIENT_ID` = 你的 Client ID
-   - `GDRIVE_CLIENT_SECRET` = 你的 Client Secret
-   - `GDRIVE_REFRESH_TOKEN` = 打印的 refresh token
-
-**方式 B：Google Colab（本机连不上 Google 时用）**
-
-1. 打开 [Google Colab](https://colab.research.google.com) → 新建笔记本
-2. 第一个 cell 运行: `!pip install -q google-api-python-client google-auth-oauthlib`
-3. 第二个 cell 把项目里 `scripts/oauth_colab.py` 的**全部内容**粘贴进去, 运行
-4. 按提示输入刚复制的 **Client ID** 和 **Client Secret**
-5. 脚本打印一个授权链接 → **浏览器打开** → 用你自己的 Google 账号登录并授权 →
-   复制页面上的 `code` 粘贴回 Colab
-6. 脚本打印三个值, 分别添加为 GitHub Secret（同方式 A 的三个）
+> 💡 微软会轮换 refresh token，但实测旧 token 短期内仍有效（连刷多次不互相挤掉），
+> 所以 Actions 里刷出来的新 token 不回写 Secret 也没关系。
 
 ## 运行
 
 ### 手动触发
 `Actions → Download & Upload Telegram Videos → Run workflow`
 
-可在 workflow 输入中指定 `max_size_gb` (下载上限) 和 `gdrive_folder` (目标文件夹)。
+可在 workflow 输入中指定 `max_size_gb` (下载上限) 和 `onedrive_folder` (OneDrive2 目标文件夹)。
 
 ### 自动定时
 每 6 小时自动执行（北京时间 02:00 / 08:00 / 14:00 / 20:00）
@@ -154,8 +117,8 @@ python scripts/login.py
 cp config/config.yaml.example config/config.yaml
 # 编辑 config.yaml 填入 Telegram API 信息
 
-# 2. 配置 Google Drive OAuth 凭证 (本地运行用)
-#    设置环境变量 GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET / GDRIVE_REFRESH_TOKEN
+# 2. 配置 OneDrive2 凭证 (本地运行用)
+#    设置环境变量 OD_CLIENT_ID / OD_CLIENT_SECRET / OD_REFRESH_TOKEN
 #    (与 GitHub Secrets 相同的值)
 
 # 3. 运行
@@ -165,15 +128,15 @@ bash scripts/run.sh
 ## 首次运行注意事项
 
 - ⚠️ **GitHub Actions 无法交互输入验证码**，首次运行前必须先本地跑 `scripts/login.py` 登录，把打印的字符串配置为 `TG_SESSION_STRING` Secret（见上文步骤）。字符串会话一次生成永久有效，无需每次更新。
-- 上传到 Google Drive 用的是 **OAuth 用户凭证**，文件直接进**你自己的** `TelegramVideos` 文件夹（网页立即可见），用你的存储配额。
+- 上传到 OneDrive2 用的是 **refresh token 认证**，文件直接进 **OneDrive2 的 `TelegramVideos` 文件夹**（网页立即可见），用它的 1TB 存储配额。
 - Telegram 登录后频繁在不同 IP 登录可能触发风控，session 复用可避免此问题
 
 ## 分目录规则
 
-上传到 Google Drive 时按来源自动分目录：
+上传到 OneDrive2 时按来源自动分目录：
 
-| 来源 | 本地目录 | Google Drive 目录 |
-|------|---------|------------------|
+| 来源 | 本地目录 | OneDrive2 目录 |
+|------|---------|----------------|
 | 收藏 (Saved Messages, `me`) | `downloads/我的收藏/` | `TelegramVideos/我的收藏/` |
 | 频道/群组 | `downloads/<频道名或ID>/` | `TelegramVideos/<频道名或ID>/` |
 
@@ -185,7 +148,8 @@ telegram-video-uploader/
 ├── downloader/
 │   ├── __init__.py
 │   ├── telegram_downloader.py              # Telegram 视频下载
-│   └── uploader.py                         # Google Drive API 上传
+│   ├── onedrive_uploader.py                # OneDrive2 上传 (Microsoft Graph API)
+│   └── uploader.py                         # (旧) Google Drive 上传, 已停用可删
 ├── main.py                                 # 本地运行入口
 ├── scripts/
 │   ├── run.sh                              # 本地一键运行

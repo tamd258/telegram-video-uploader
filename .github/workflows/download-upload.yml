@@ -8,8 +8,8 @@ on:
         required: false
         default: '12'
         type: string
-      gdrive_folder:
-        description: 'Google Drive 目标文件夹路径'
+      onedrive_folder:
+        description: 'OneDrive2 目标文件夹路径'
         required: false
         default: 'TelegramVideos'
         type: string
@@ -94,13 +94,13 @@ jobs:
           asyncio.run(main())
           "
 
-      # ---- 上传到 Google Drive (按来源分目录) ----
-      - name: Upload to Google Drive
+      # ---- 上传到 OneDrive2 (Microsoft Graph, 按来源分目录) ----
+      - name: Upload to OneDrive2
         env:
-          GDRIVE_FOLDER: ${{ github.event.inputs.gdrive_folder || secrets.GDRIVE_FOLDER || 'TelegramVideos' }}
-          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
-          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
-          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          ONE_DRIVE_FOLDER: ${{ github.event.inputs.onedrive_folder || secrets.OD_FOLDER || 'TelegramVideos' }}
+          OD_CLIENT_ID: ${{ secrets.OD_CLIENT_ID }}
+          OD_CLIENT_SECRET: ${{ secrets.OD_CLIENT_SECRET }}
+          OD_REFRESH_TOKEN: ${{ secrets.OD2_REFRESH_TOKEN }}
         run: |
           if [ ! -f downloads/.filelist ]; then
             echo "No files to upload"
@@ -111,13 +111,13 @@ jobs:
           import os
           from pathlib import Path
           from collections import defaultdict
-          from downloader.uploader import GoogleDriveUploader
+          from downloader.onedrive_uploader import OneDriveUploader
 
           filelist = Path('downloads/.filelist').read_text().strip().split('\n')
           files = [Path(f) for f in filelist if f and Path(f).exists()]
-          print(f'Uploading {len(files)} files to Google Drive')
+          print(f'Uploading {len(files)} files to OneDrive2')
 
-          base = os.environ.get('GDRIVE_FOLDER', 'TelegramVideos').strip('/')
+          base = os.environ.get('ONE_DRIVE_FOLDER', 'TelegramVideos').strip('/')
 
           # 按来源子目录分组: downloads/<来源>/<文件>
           groups = defaultdict(list)
@@ -129,13 +129,13 @@ jobs:
               source = rel.parts[0] if len(rel.parts) > 1 else ''
               groups[source].append(p)
 
-          uploader = GoogleDriveUploader(
+          uploader = OneDriveUploader(
               remote_dir='/' + base,
               delete_after_upload=True,
           )
 
           if not uploader.test_connection():
-              print('❌ Cannot connect to Google Drive')
+              print('❌ Cannot connect to OneDrive2')
               exit(1)
 
           total_success = 0
@@ -148,7 +148,7 @@ jobs:
               total_success += success
               total_failed += failed
 
-          print(f'☁️ Google Drive upload: {total_success} success, {total_failed} failed')
+          print(f'☁️ OneDrive2 upload: {total_success} success, {total_failed} failed')
 
           if total_failed > 0:
               exit(1)
