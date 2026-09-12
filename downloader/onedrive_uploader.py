@@ -195,16 +195,16 @@ class OneDriveUploader:
                 if "409" not in str(e):  # 并发创建冲突视为已存在
                     raise
 
-    def _existing_names(self, dir_path: str) -> set:
-        """列出目录下已有文件名 (分页取全)"""
-        names = set()
-        url = f"{self._children_url(dir_path)}?$select=name&$top=200"
+    def _existing_names(self, dir_path: str) -> dict:
+        """列出目录下已有文件名→大小 (分页取全); 用于同名跳过前校验大小"""
+        sizes = {}
+        url = f"{self._children_url(dir_path)}?$select=name,size&$top=200"
         while url:
             _, d = self._request("GET", url)
             for it in d.get("value", []):
-                names.add(it.get("name"))
+                sizes[it.get("name")] = int(it.get("size") or 0)
             url = d.get("@odata.nextLink")
-        return names
+        return sizes
 
     # ------------------------------------------------------------------
     # 上传
@@ -245,16 +245,23 @@ class OneDriveUploader:
             logger.info("上传: %s (%.2fGB)", file_path.name, size / 1024 ** 3)
 
             try:
-                if file_path.name in existing:
-                    logger.info("OneDrive 上已存在同名文件, 跳过: %s", file_path.name)
+                esize = existing.get(file_path.name)
+                if esize == size:
+                    logger.info("OneDrive 已有同名同大小文件, 跳过: %s (%d B)", file_path.name, esize)
                     if self.delete_after_upload:
                         file_path.unlink()
                     success += 1
                     continue
 
-                self._upload_file_resumable(file_path, folder_id, size)
+                # 同名但大小不符(典型: 历史遗留的 0 字节坏文件) → 覆盖重传
+                conflict = "fail" if esize is None else "replace"
+                if esize is not None:
+                    logger.warning("OneDrive 已有同名文件大小不符 (本地 %d B / 云端 %d B), 覆盖重传: %s",
+                                   size, esize, file_path.name)
+
+                self._upload_file_resumable(file_path, folder_id, size, conflict=conflict)
                 logger.info("上传成功: %s", file_path.name)
-                existing.add(file_path.name)   # 记入本轮已传, 后续同名重复项直接跳过
+                existing[file_path.name] = size   # 记入本轮已传, 后续同名重复项直接跳过
                 if self.delete_after_upload:
                     file_path.unlink()
                     logger.debug("已删除本地文件: %s", file_path.name)
@@ -293,12 +300,12 @@ class OneDriveUploader:
         except (ValueError, UnicodeDecodeError):
             return None, raw
 
-    def _upload_file_resumable(self, file_path: Path, folder_id: str, size: int) -> None:
-        # 1. 创建 upload session (conflictBehavior=fail: 已存在则报 409)
+    def _upload_file_resumable(self, file_path: Path, folder_id: str, size: int, conflict: str = "fail") -> None:
+        # 1. 创建 upload session (conflictBehavior=fail: 已存在则报 409; replace: 覆盖同名坏文件)
         _, session = self._request(
             "POST",
             f"{GRAPH}/me/drive/items/{folder_id}:/{urllib.parse.quote(file_path.name)}:/createUploadSession",
-            json_body={"item": {"@microsoft.graph.conflictBehavior": "fail"}},
+            json_body={"item": {"@microsoft.graph.conflictBehavior": conflict}},
         )
         upload_url = session["uploadUrl"]
 
