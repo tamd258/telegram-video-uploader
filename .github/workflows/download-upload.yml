@@ -125,7 +125,8 @@ jobs:
               if key in seen:
                   continue
               seen.add(key)
-              if p.exists():
+              # 0 字节/近空文件 = 下载失败的残留, 传上去也是垃圾
+              if p.exists() and p.stat().st_size > 1024:
                   files.append(p)
           print(f'Uploading {len(files)} files to OneDrive2')
 
