@@ -114,7 +114,19 @@ jobs:
           from downloader.onedrive_uploader import OneDriveUploader
 
           filelist = Path('downloads/.filelist').read_text().strip().split('\n')
-          files = [Path(f) for f in filelist if f and Path(f).exists()]
+          # 去重 + 只保留真实存在的文件 (清单里可能有重复路径)
+          seen = set()
+          files = []
+          for f in filelist:
+              if not f:
+                  continue
+              p = Path(f)
+              key = str(p)
+              if key in seen:
+                  continue
+              seen.add(key)
+              if p.exists():
+                  files.append(p)
           print(f'Uploading {len(files)} files to OneDrive2')
 
           base = os.environ.get('ONE_DRIVE_FOLDER', 'TelegramVideos').strip('/')

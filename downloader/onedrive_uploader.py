@@ -231,8 +231,14 @@ class OneDriveUploader:
         for file_path in files:
             file_path = Path(file_path)
             if not file_path.exists():
-                logger.warning("文件不存在: %s", file_path)
-                failed += 1
+                # 同名文件在同一批里重复出现时, 前一个已上传并删掉了本地副本,
+                # 这属于"本轮已传过", 不是失败, 跳过即可 (否则会误判 failed → 整步 exit 1)
+                if file_path.name in existing:
+                    logger.info("本轮已上传(本地已清理), 跳过: %s", file_path.name)
+                    success += 1
+                else:
+                    logger.warning("文件不存在: %s", file_path)
+                    failed += 1
                 continue
 
             size = file_path.stat().st_size
@@ -248,6 +254,7 @@ class OneDriveUploader:
 
                 self._upload_file_resumable(file_path, folder_id, size)
                 logger.info("上传成功: %s", file_path.name)
+                existing.add(file_path.name)   # 记入本轮已传, 后续同名重复项直接跳过
                 if self.delete_after_upload:
                     file_path.unlink()
                     logger.debug("已删除本地文件: %s", file_path.name)
