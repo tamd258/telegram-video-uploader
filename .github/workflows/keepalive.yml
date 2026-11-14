@@ -1,0 +1,42 @@
+name: keepalive
+
+# 为什么需要这个: GitHub 会因为「仓库 60 天没有任何活动」自动停用该仓库**所有**定时 workflow。
+# 本仓库 2026-11-11 就是这么被停掉的(最后 push 2026-09-12, 到 11-11 满 60 天),
+# 表现是"定时任务突然不再触发", 得手动 enable 或推一次 commit 才能恢复。
+# 这个 workflow 每月 1 号 / 15 号往仓库推一个空提交, 让仓库始终保持"有活动", 定时就不会被停。
+
+on:
+  schedule:
+    - cron: '0 3 1,15 * *'        # 每月 1/15 号 UTC 03:00 = 北京 11:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 空提交(保持仓库活跃)
+        run: |
+          git config user.name "keepalive-bot"
+          git config user.email "keepalive-bot@users.noreply.github.com"
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive
+          git add .keepalive
+          if git diff --cached --quiet; then
+            echo "无变化, 跳过提交"
+          else
+            git commit -m "chore: keepalive $(date -u +%F)"
+            for i in 1 2 3; do
+              git push && break || { echo "push 重试 $i"; git pull --rebase --autostash; sleep 5; }
+            done
+          fi
+          echo "最近一次提交:"; git log -1 --format='%h %ad %s' --date=short
