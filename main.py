@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from downloader.telegram_downloader import TelegramVideoDownloader
-from downloader.onedrive_uploader import OneDriveUploader
+from downloader.gdrive_uploader import GDriveUploader
 
 logger = logging.getLogger(__name__)
 
@@ -87,18 +87,18 @@ async def run_pipeline():
         return
 
     # 2. 上传到 OneDrive2 (Microsoft Graph)
-    logger.info("=== 开始上传到 OneDrive2 ===")
+    logger.info("=== 开始上传到 Google Drive (gd6/TelegramVideos) ===")
     cloud_cfg = cfg.get("cloud", {})
 
-    # 上传器从环境变量读取凭证 (OD_CLIENT_ID / OD_CLIENT_SECRET / OD_REFRESH_TOKEN)
-    # OneDrive2 账号 = yanfatd@gmail.com, 由 OD_REFRESH_TOKEN 决定
-    uploader = OneDriveUploader(
+    # 上传器从环境变量读取凭证 (GD_CLIENT_ID / GD_CLIENT_SECRET / GD_REFRESH_TOKEN)
+    # 目标 = GoogleDrive6 的 /TelegramVideos (OneDrive2 会员已到期, 那套停用)
+    uploader = GDriveUploader(
         remote_dir=cloud_cfg.get("remote_dir", "/TelegramVideos"),
         delete_after_upload=cloud_cfg.get("delete_after_upload", True),
     )
 
     if not uploader.test_connection():
-        logger.error("无法连接到 OneDrive2, 退出")
+        logger.error("无法连接到 Google Drive, 退出")
         sys.exit(1)
 
     # 按来源子目录分组上传: downloads/<来源>/<文件> → Drive/<remote_dir>/<来源>/
