@@ -8,8 +8,8 @@ on:
         required: false
         default: '12'
         type: string
-      onedrive_folder:
-        description: 'OneDrive2 目标文件夹路径'
+      gdrive_folder:
+        description: 'GoogleDrive6 目标文件夹路径 (默认 TelegramVideos)'
         required: false
         default: 'TelegramVideos'
         type: string
@@ -94,13 +94,13 @@ jobs:
           asyncio.run(main())
           "
 
-      # ---- 上传到 OneDrive2 (Microsoft Graph, 按来源分目录) ----
-      - name: Upload to OneDrive2
+      # ---- 上传到 Google Drive (GoogleDrive6 的 TelegramVideos, 按来源分目录) ----
+      - name: Upload to Google Drive (gd6)
         env:
-          ONE_DRIVE_FOLDER: ${{ github.event.inputs.onedrive_folder || secrets.OD_FOLDER || 'TelegramVideos' }}
-          OD_CLIENT_ID: ${{ secrets.OD_CLIENT_ID }}
-          OD_CLIENT_SECRET: ${{ secrets.OD_CLIENT_SECRET }}
-          OD_REFRESH_TOKEN: ${{ secrets.OD2_REFRESH_TOKEN }}
+          GDRIVE_FOLDER: ${{ github.event.inputs.gdrive_folder || 'TelegramVideos' }}
+          GD_CLIENT_ID: ${{ secrets.GD_CLIENT_ID }}
+          GD_CLIENT_SECRET: ${{ secrets.GD_CLIENT_SECRET }}
+          GD_REFRESH_TOKEN: ${{ secrets.GD_REFRESH_TOKEN }}
         run: |
           if [ ! -f downloads/.filelist ]; then
             echo "No files to upload"
@@ -111,10 +111,9 @@ jobs:
           import os
           from pathlib import Path
           from collections import defaultdict
-          from downloader.onedrive_uploader import OneDriveUploader
+          from downloader.gdrive_uploader import GDriveUploader
 
           filelist = Path('downloads/.filelist').read_text().strip().split('\n')
-          # 去重 + 只保留真实存在的文件 (清单里可能有重复路径)
           seen = set()
           files = []
           for f in filelist:
@@ -125,14 +124,12 @@ jobs:
               if key in seen:
                   continue
               seen.add(key)
-              # 0 字节/近空文件 = 下载失败的残留, 传上去也是垃圾
               if p.exists() and p.stat().st_size > 1024:
                   files.append(p)
-          print(f'Uploading {len(files)} files to OneDrive2')
+          print(f'Uploading {len(files)} files to Google Drive')
 
-          base = os.environ.get('ONE_DRIVE_FOLDER', 'TelegramVideos').strip('/')
+          base = os.environ.get('GDRIVE_FOLDER', 'TelegramVideos').strip('/')
 
-          # 按来源子目录分组: downloads/<来源>/<文件>
           groups = defaultdict(list)
           for p in files:
               try:
@@ -142,13 +139,10 @@ jobs:
               source = rel.parts[0] if len(rel.parts) > 1 else ''
               groups[source].append(p)
 
-          uploader = OneDriveUploader(
-              remote_dir='/' + base,
-              delete_after_upload=True,
-          )
+          uploader = GDriveUploader(remote_dir='/' + base, delete_after_upload=True)
 
           if not uploader.test_connection():
-              print('❌ Cannot connect to OneDrive2')
+              print('❌ Cannot connect to Google Drive')
               exit(1)
 
           total_success = 0
@@ -161,7 +155,7 @@ jobs:
               total_success += success
               total_failed += failed
 
-          print(f'☁️ OneDrive2 upload: {total_success} success, {total_failed} failed')
+          print(f'☁️ GoogleDrive6 upload: {total_success} success, {total_failed} failed')
 
           if total_failed > 0:
               exit(1)
